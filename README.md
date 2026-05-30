@@ -10,6 +10,9 @@ Runs the main analysis workflow, including weather data preprocessing, cold snap
 ### preprocessing.py
 Preprocesses historical weather data to generate formatted inputs for cold snap event detection.
 
+### find_coldsnaps_code.py
+Detects cold snap events in historical weather data using location-specific thresholds and duration-based criteria.
+
 ### characterize_coldsnap_code.py
 Computes metrics and characteristics for detected cold snap events.
 
