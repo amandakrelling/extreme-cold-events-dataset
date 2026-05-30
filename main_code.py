@@ -9,54 +9,85 @@ Created on Fri Jul 25 13:42:47 2025
 
 # libraries
 import pandas as pd
-import numpy as np
-from psychrolib import SetUnitSystem, GetTWetBulbFromRelHum, SI
 import os
 import re
-import metpy.calc as mpcalc
-from metpy.calc import heat_index
-from metpy.calc import wet_bulb_temperature ## <<<<<<<<<<<<<<<<<<<<<<<<< here
-from metpy.calc import dewpoint_from_relative_humidity  ## <<<<<<<<<<<<<<<<<<<<<<<<< here
-from metpy.units import units
 import json
 import time
 from pathlib import Path
-from scipy.stats import genpareto
-import matplotlib.pyplot as plt
-from scipy.stats import gumbel_r
 
 
-# directories
+
+#%% CHANGE HERE
+
+# Set this path to the root directory containing the EPW dataset folder
+# The dataset folder name is defined below (dataset_folder_name)
+#
+# Expected folder structure:
+# path_main/
+# └── Data - US Dataset EPWs    ← dataset_folder_name
+#     └── STATE_city/
+#         └── historical/
+#             ├── STATE_city_YYYY.epw
+#             ├── STATE_city_YYYY.epw
+#             └── ...
+#
+# Example:
+# path_main/
+# └── Data - US Dataset EPWs/
+#     └── AK_Anchorage/
+#         └── historical/
+#             ├── AK_Anchorage_2017.epw
+#             ├── AK_Anchorage_2018.epw
+#
+# Replace '...' below with the path to your root directory.
 path_main = r'...'
+
+
+# Name of the folder containing the EPW dataset
+# This folder must be located inside the main directory (path_main)
+dataset_folder_name = 'Data - US Dataset EPWs'
+
+
+# Set this path to the directory where all Python scripts used in this workflow are located
+# This folder should contain any auxiliary or supporting code modules that are imported
+# or referenced by the main script
+#
+# Replace '...' below with the path to your code directory
 path_codes = r'...'
-profile_path = r'...'
+
+
+# Control which parts of the workflow to run
+# Set to 'yes' or 'no' depending on the desired execution
+#
+# - run_dataset_preprocessing:
+#     Performs preprocessing of the raw weather data (e.g., cleaning, formatting)
+#     This step typically only needs to be run once, as it generates intermediate
+#     data that can be reused in subsequent runs
+#
+# - run_event_detection:
+#     Runs the cold snap detection and characterization using the preprocessed data
+#     This step can be run multiple times (e.g., when adjusting detection parameters)
+#
+# Example:
+# If preprocessing has already been completed, you can skip it by setting:
+# run_dataset_preprocessing = 'no'
+run_dataset_preprocessing = 'yes'
+run_event_detection = 'yes'
 
 
 
-# set directory
+#%% JUST RUN
+
+
+# Get supporting code modules
 os.chdir(path_codes)
-from preprocessing import merge_multiple_years, calculate_wbgt, calculate_heatindex, calculate_wet_bulb_temperature, dict_update, run_preprocessing
-from find_heatwaves_coldsnaps_code import end_and_start_date, find_heatwaves, find_coldsnaps
-from characterize_heatwaves_code import characterize_heatwaves, calculate_survivability, define_environmental_variables, define_personal_profile, metrics_from_hourly_hi, max_consecutive_heat_days, hw_category
+from preprocessing import merge_multiple_years, dict_update, run_preprocessing
+from find_coldsnaps_code import end_and_start_date, find_coldsnaps
 from characterize_coldsnaps_code import  characterize_coldsnaps
-# from detect_heatwave import find_heatwaves, cooling_degree_days, end_and_start_date, return_period_weibull, get_consecutive_hours, categorize_heatwave, define_heatwave_categories, characterize_heatwaves
-from HEATLim_ak import *
 
 
 # Start time
 start_time = time.time()
-
-
-# pre-process weather data?
-run_dataset_preprocessing = 'no'
-method_name = 'm8'
-run_event_detection = 'yes'
-
-
-# Dataset folder name
-dataset_folder_name = 'Data - US Dataset EPWs'
-# dataset_folder_name = 'Data'
-# dataset_folder_name = 'Data - Worldwide A80'
 
 
 # Ensure long path handling
@@ -65,56 +96,38 @@ long_path_main = f"\\\\?\\{path_main}"
 
 # Define threshold and minimum required consecutive days
 if run_event_detection == 'yes':
-    # heat waves
-    threshold_parameter = 'hi_c'
-    threshold_method = 'variable' # or 'absolute' 'variable'
-    threshold_abs_value = 19
-    threshold_perc = 'hi_sdeb_daily' #'hi_sdeb_daily'
     # cold snaps
     threshold_parameter = 'dbt_c'
     threshold_method = 'variable' # or 'absolute' 'variable'
     threshold_abs_value = 5
     threshold_perc = 'dbt_op_sdeb_daily' #'dbt_op_sdeb_daily'
 
-min_num_days = [2] #, 5  # Change this to set how many consecutive days are required
-
+min_num_days = [2] # Change this to set how many consecutive days are required
 
 
 periods = ['historical'] #, 'midterm', 'longterm'
 
-profile_filename = '65_over_livability_test.txt'
 
-exposure_time = 6
+# ===============================================================================================
 
 # list all folders and files in directory
 files_in_dir = os.listdir(f'{path_main}/{dataset_folder_name}')
 
+# get lits of cities, patter:
+## ^ → start of string
+## [A-Z]{2} → exactly two uppercase letters (state code)
+## _ → literal underscore
+## [A-Za-z\s-]+ → one or more letters, spaces, or hyphens (city name)
+## $ → end of string
+pattern = r'^[A-Z]{2}_[A-Za-z\s-]+$'
 
-# get lits of cities
-if dataset_folder_name == 'Data - US Dataset EPWs':
-    # ^ → start of string
-    # [A-Z]{2} → exactly two uppercase letters (state code)
-    # _ → literal underscore
-    # [A-Za-z\s-]+ → one or more letters, spaces, or hyphens (city name)
-    # $ → end of string
-    pattern = r'^[A-Z]{2}_[A-Za-z\s-]+$'
-    
-    # list of cities
-    cities = [c for c in files_in_dir if re.match(pattern, c)] # cities = files_in_dir
-else:
-    # ^ → Start of the string.
-    # \d+ → One or more digits (numbers).
-    # [A-Za-z]? → Optional single letter after the number.
-    # _ → Underscore separator.
-    # [A-Za-z]+ → City name (assuming it contains only letters).
-    pattern = r'^\d+[A-Za-z]?_[A-Za-z]+'
-    
-    # list of cities
-    cities = [c for c in files_in_dir if re.match(pattern, c)] # cities = files_in_dir
+# list of cities
+cities = [c for c in files_in_dir if re.match(pattern, c)] # cities = files_in_dir
 
 
 
-#%%
+
+# ===============================================================================================
 combinations = []
 for c in cities:
     for p in periods:
@@ -122,39 +135,18 @@ for c in cities:
             combinations.append((c, p, d))
     
 # combinations = combinations[15:]
-            
-#%% run pre-processing?
+          
+  
+# ===============================================================================================
+# run pre-processing?
 if run_dataset_preprocessing == 'yes':
     weather_stats = run_preprocessing (combinations, dataset_folder_name, path_main)
 else:
     with open(f'{path_main}/{dataset_folder_name}/weather_stats.json', 'r') as file:
         weather_stats = json.load(file)
 
+# ===============================================================================================
 
-# # End time
-# end_time = time.time()
-
-
-# # with open(f'{path_main}/{dataset_folder_name}/weather_stats_historical.json', 'r') as file:
-# #     weather_stats_historical = json.load(file)
-
-
-# merged = {
-#     city: {
-#         **weather_stats.get(city, {}),
-#         **weather_stats_historical.get(city, {})
-#     }
-#     for city in set(weather_stats) | set(weather_stats_historical)
-# }
-
-
-# # save results to JSON files
-# output_file = os.path.join(path_main, dataset_folder_name, "weather_stats2.json")
-# with open(output_file, "w") as json_file:
-#     json.dump(merged, json_file, indent=4)
-
-
-#%%
 all_events = {}
 
 # comb = combinations[-2]
@@ -179,35 +171,22 @@ for comb in combinations:
     daily_min_df = pd.read_csv(os.path.join(path_main, dataset_folder_name, city, prd, "multiyear_dailymin_weatherdata.csv"))
     
     
-    # find heat waves?
+    # find cold snap?
     if run_event_detection == 'yes':
-        # run function to detect heat waves
-        heatwaves_start_end_dates = find_heatwaves (daily_avg_df, threshold_param, threshold, min_days)
-        # write start and end dates as csv file
-        heatwaves_start_end_dates.to_csv(os.path.join(path_main, dataset_folder_name, city, prd, "heatwaves_start_end_dates.csv"), index=False)
-        
         # run function to detect cold snaps
         coldsnaps_start_end_dates = find_coldsnaps (daily_avg_df, threshold_param, threshold, min_days)
         # write start and end dates as csv file
         coldsnaps_start_end_dates.to_csv(os.path.join(path_main, dataset_folder_name, city, prd, "coldsnaps_start_end_dates.csv"), index=False)
         
     else:
-        # just read csv file with start and end dates of heat waves
-        heatwaves_start_end_dates = pd.read_csv(os.path.join(path_main, dataset_folder_name, city, prd, "heatwaves_start_end_dates.csv"))
-        
         # just read csv file with start and end dates of cold snaps
         coldsnaps_start_end_dates = pd.read_csv(os.path.join(path_main, dataset_folder_name, city, prd, "coldsnaps_start_end_dates.csv"))
     
     
     # number of events
-    num_heatwaves = len(heatwaves_start_end_dates)
     num_coldsnaps = len(coldsnaps_start_end_dates)
     
-    # characterize heat waves and cold snaps
-    if num_heatwaves > 0:
-        hw_metrics = characterize_heatwaves(mdf, heatwaves_start_end_dates, profile_path, profile_filename, exposure_time)
-    else:
-        hw_metrics = []
+    # characterize cold snaps
     if num_coldsnaps > 0:
         cs_metrics = characterize_coldsnaps(mdf, coldsnaps_start_end_dates, city, prd)
     else:
@@ -215,43 +194,33 @@ for comb in combinations:
     
     
     # events
-    events = {city: {'heatwaves': {prd:{min_days: {'number_events': num_heatwaves,
-                                                   'hw_metrics': hw_metrics}}},
-                     'coldsnaps': {prd:{min_days: {'number_events': num_coldsnaps,
+    events = {city: {'coldsnaps': {prd:{min_days: {'number_events': num_coldsnaps,
                                                    'cs_metrics': cs_metrics}}}
                      }}
               
-    # events = {city:{prd:{min_days: {'number_events': num_events,
-    #                                 'hw_metrics': hw_metrics} }}}
-    
     # update dictionaries: events and weather statistics
     dict_update(all_events, events)
     
 
 
-# output_file = os.path.join(path_main, "events_heatwaves.json")
-# with open(output_file, "w") as json_file:
-#     json.dump(all_events, json_file, indent=4)
-
-
 # Save to JSON file
-output_file = os.path.join(path_main, dataset_folder_name, "events_heatwaves_coldsnaps.json")
+output_file = os.path.join(path_main, dataset_folder_name, "events_coldsnaps.json")
 with open(output_file, 'w') as f:
     json.dump(all_events, f, indent=4, default=str)  # default=str is to handle datetime objects
 
 
 
-# save JSON file in csv format (separate heat waves from cold snaps)
+# save JSON file in csv format
 data = all_events
 
 def build_df(data: dict, event_type: str) -> pd.DataFrame:
     """
     Flatten nested structure:
       data[city][event_type][period][min_days] -> {'number_events': N, '<metrics_key>': [ {...}, {...}, ... ]}
-    event_type: 'heatwaves' or 'coldsnaps'
+    event_type: 'coldsnaps'
     Returns a tidy DataFrame with one row per event and metric keys as columns.
     """
-    metrics_key = "hw_metrics" if event_type == "heatwaves" else "cs_metrics"
+    metrics_key = "cs_metrics"
     rows = []
 
     for city, city_block in (data or {}).items():
@@ -302,15 +271,12 @@ def build_df(data: dict, event_type: str) -> pd.DataFrame:
 
     return df
 
-# Build both DataFrames
-heatwaves_df = build_df(data, "heatwaves")
+# Build DataFrame
 coldsnaps_df = build_df(data, "coldsnaps")
 
 # Save results
 out_dir = Path(".")
-heatwaves_df.to_csv(os.path.join(path_main, dataset_folder_name, "heatwaves_events.csv"), index=False)
 coldsnaps_df.to_csv(os.path.join(path_main, dataset_folder_name, "coldsnaps_events.csv"), index=False)
-
 
 
 

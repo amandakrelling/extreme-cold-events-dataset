@@ -39,11 +39,11 @@ def pick_best_idx(d, target, group, used=None):
     tied = group.loc[tied_idx]
 
     # Treat NaNs as "worse" so they don't win ties
-    tied_avg = tied['avghourly_dbt'].fillna(float('inf'))
+    tied_avg = tied['dbt_mean__c'].fillna(float('inf'))
     min_avg = tied_avg.min()
     tied = tied.loc[tied_avg == min_avg]
 
-    tied_min = tied['minhourly_dbt'].fillna(float('inf'))
+    tied_min = tied['dbt_min__c'].fillna(float('inf'))
     min_min = tied_min.min()
     tied = tied.loc[tied_min == min_min]
 
@@ -92,9 +92,9 @@ selected.to_csv(os.path.join(path_main, dataset_folder_name, "coldsnaps_events_s
 
 
 # formatting final dataset
-selected_formatted = selected[['city', 'start', 'end', 'duration', 'category', 
-                               'avghourly_dbt', 'maxhourly_dbt', 'minhourly_dbt',
-                               'hdh_dbt_0c', 'overcoolingdeg_dbt_0c']]
+selected_formatted = selected[['state_city', 'start__month_day_year', 'end__month_day_year', 'duration__days', 'category', 
+                               'dbt_mean__c', 'dbt_max__c', 'dbt_min__c',
+                               'hdh__c', 'overcoolingdeg_c']]
 
 selected_formatted.to_csv(os.path.join(path_main, dataset_folder_name, "coldsnaps_events_selected_final.csv"), index=False)
 
